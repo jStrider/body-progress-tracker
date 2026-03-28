@@ -1,0 +1,15 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ML models (too large, auto-downloaded)
+pose_landmarker_full.task
+selfie_multiclass_256x256.tflite
+
+# Your personal data
+photos/
+data.json
+
+# Rembg cache
+.u2net/

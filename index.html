@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Progress Tracker — Panda</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0d;
+      --surface: #1a1a1a;
+      --surface2: #242424;
+      --border: #333;
+      --text: #e8e8e8;
+      --text-muted: #888;
+      --accent: #6c63ff;
+      --accent2: #ff6b6b;
+      --green: #4ecdc4;
+      --radius: 12px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding: 2.5rem 1rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.02em; }
+    .header h1 span { color: var(--accent); }
+    .header .subtitle { color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem; }
+
+    /* Container */
+    .container { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem; }
+
+    /* Section */
+    .section { margin-bottom: 2.5rem; }
+    .section-title {
+      font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .section-title .icon { font-size: 1.3rem; }
+
+    /* Current date display */
+    .current-date {
+      text-align: center;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 0.5rem;
+    }
+    .current-notes {
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      margin-bottom: 0.75rem;
+      min-height: 1.4rem; /* prevent layout shift */
+    }
+    .current-stats {
+      display: flex;
+      justify-content: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+      min-height: 2rem; /* prevent layout shift when no stats */
+    }
+    .current-stats .chip {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.8rem;
+      border-radius: 999px;
+      font-size: 0.85rem;
+    }
+    .current-stats .chip strong { color: var(--accent); }
+
+    /* Photo viewer with crossfade */
+    .photo-viewer {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1.5rem;
+    }
+    .photo-slot {
+      background: #000;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+      position: relative;
+      /* Fixed aspect ratio — never changes regardless of content */
+      aspect-ratio: 3/4;
+      /* Prevent any layout recalculation */
+      contain: layout style paint;
+    }
+    .photo-slot img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      /* contain, not cover — shows full image with black bars if needed */
+      object-fit: contain;
+      transition: opacity 0.3s ease;
+      cursor: zoom-in;
+      /* Prevent image from affecting layout */
+      display: block;
+    }
+    .photo-slot img.fade-out { opacity: 0; }
+    .photo-slot img.fade-in { opacity: 1; }
+    .photo-slot .label {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      text-align: center;
+      padding: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: linear-gradient(transparent, rgba(0,0,0,0.7));
+      z-index: 2;
+    }
+
+    /* Slider */
+    .slider-container {
+      padding: 0.5rem 0 1rem;
+    }
+    .slider-track {
+      position: relative;
+      padding: 0 0.5rem;
+    }
+    .slider-track input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 6px;
+      border-radius: 3px;
+      background: var(--surface2);
+      outline: none;
+      cursor: pointer;
+    }
+    .slider-track input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 3px solid var(--bg);
+      box-shadow: 0 0 8px rgba(108,99,255,0.5);
+      cursor: grab;
+    }
+    .slider-track input[type="range"]::-moz-range-thumb {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 3px solid var(--bg);
+      box-shadow: 0 0 8px rgba(108,99,255,0.5);
+      cursor: grab;
+    }
+    .slider-dates {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.4rem;
+      padding: 0 0.5rem;
+    }
+    .slider-day-count {
+      text-align: center;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    /* Compare section */
+    .compare-controls {
+      display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 1rem;
+    }
+    .compare-controls select {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .compare-controls select:focus { outline: none; border-color: var(--accent); }
+    .compare-label { color: var(--text-muted); font-size: 0.85rem; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .compare-col { text-align: center; }
+    .compare-col .date-label {
+      font-size: 0.9rem; font-weight: 600; margin-bottom: 0.75rem; color: var(--accent);
+    }
+    .compare-col .photo-grid-small {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.5rem;
+    }
+    .photo-card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    .photo-card img {
+      width: 100%;
+      aspect-ratio: 3/4;
+      object-fit: cover;
+      display: block;
+      cursor: zoom-in;
+    }
+    .photo-card .label {
+      text-align: center;
+      padding: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .compare-empty {
+      text-align: center;
+      color: var(--text-muted);
+      padding: 3rem 1rem;
+      font-size: 0.95rem;
+    }
+
+    /* Chart */
+    .chart-container {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      position: relative;
+      height: 300px;
+    }
+    .chart-empty {
+      display: flex; align-items: center; justify-content: center;
+      height: 100%; color: var(--text-muted);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center; padding: 2rem 1rem;
+      color: var(--text-muted); font-size: 0.8rem;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Lightbox */
+    .lightbox {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.92);
+      z-index: 1000;
+      align-items: center; justify-content: center;
+      cursor: zoom-out;
+    }
+    .lightbox.open { display: flex; }
+    .lightbox img {
+      max-width: 95vw; max-height: 95vh;
+      object-fit: contain; border-radius: 8px;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .photo-viewer { gap: 0.4rem; }
+      .compare-grid { grid-template-columns: 1fr; }
+      .compare-col .photo-grid-small { grid-template-columns: repeat(3, 1fr); }
+      .chart-container { height: 220px; }
+      .header h1 { font-size: 1.4rem; }
+      .current-date { font-size: 1.2rem; }
+      .current-stats { gap: 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Progress <span>Tracker</span></h1>
+    <p class="subtitle">Panda — Suivi de progression</p>
+  </div>
+
+  <div class="container">
+
+    <!-- Slider viewer -->
+    <div class="section">
+      <div class="current-date" id="current-date"></div>
+      <div class="current-notes" id="current-notes"></div>
+      <div class="current-stats" id="current-stats"></div>
+
+      <div class="photo-viewer" id="photo-viewer">
+        <div class="photo-slot" id="slot-front">
+          <img id="img-front-a" class="fade-in" src="" alt="Face">
+          <img id="img-front-b" class="fade-out" src="" alt="Face">
+          <div class="label">Face</div>
+        </div>
+        <div class="photo-slot" id="slot-back">
+          <img id="img-back-a" class="fade-in" src="" alt="Dos">
+          <img id="img-back-b" class="fade-out" src="" alt="Dos">
+          <div class="label">Dos</div>
+        </div>
+        <div class="photo-slot" id="slot-profile">
+          <img id="img-profile-a" class="fade-in" src="" alt="Profil">
+          <img id="img-profile-b" class="fade-out" src="" alt="Profil">
+          <div class="label">Profil</div>
+        </div>
+      </div>
+
+      <div class="slider-container">
+        <div class="slider-track">
+          <input type="range" id="timeline-slider" min="0" max="0" value="0" step="1">
+        </div>
+        <div class="slider-dates">
+          <span id="slider-start"></span>
+          <span id="slider-end"></span>
+        </div>
+        <div class="slider-day-count" id="slider-day-count"></div>
+      </div>
+    </div>
+
+    <!-- Compare -->
+    <div class="section">
+      <div class="section-title"><span class="icon">🔄</span> Comparaison</div>
+      <div class="compare-controls">
+        <span class="compare-label">Avant :</span>
+        <select id="compare-before"></select>
+        <span class="compare-label">Après :</span>
+        <select id="compare-after"></select>
+      </div>
+      <div id="compare-view"></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="section">
+      <div class="section-title"><span class="icon">📊</span> Évolution</div>
+      <div class="chart-container">
+        <canvas id="chart"></canvas>
+        <div class="chart-empty" id="chart-empty" style="display:none;">Pas encore assez de données pour le graphique.</div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">Progress Tracker — Panda 🐼</div>
+
+  <!-- Lightbox -->
+  <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <img id="lightbox-img" src="" alt="">
+  </div>
+
+  <script>
+    let data = { entries: [] };
+    let currentIndex = 0;
+    // Track which image layer (a or b) is currently visible per slot
+    const activeLayer = { front: 'a', back: 'a', profile: 'a' };
+
+    // --- Lightbox ---
+    function openLightbox(src) {
+      document.getElementById('lightbox-img').src = src;
+      document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox() {
+      document.getElementById('lightbox').classList.remove('open');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+    // --- Date formatting ---
+    function fmtDate(d) {
+      const dt = new Date(d + 'T00:00:00');
+      return dt.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+    }
+
+    // --- Preload all images at startup ---
+    const imageCache = {};
+    function preloadAllImages() {
+      data.entries.forEach(entry => {
+        if (!entry.photos) return;
+        ['front', 'back', 'profile'].forEach(type => {
+          if (entry.photos[type]) {
+            const img = new Image();
+            img.src = entry.photos[type];
+            imageCache[entry.photos[type]] = img;
+          }
+        });
+      });
+    }
+
+    // --- Crossfade a single slot ---
+    function crossfadeSlot(type, newSrc) {
+      const current = activeLayer[type];
+      const next = current === 'a' ? 'b' : 'a';
+      const currentImg = document.getElementById(`img-${type}-${current}`);
+      const nextImg = document.getElementById(`img-${type}-${next}`);
+
+      // Set source (already cached from preload)
+      nextImg.src = newSrc;
+      
+      // Swap immediately if cached, otherwise wait for load
+      const doSwap = () => {
+        nextImg.classList.remove('fade-out');
+        nextImg.classList.add('fade-in');
+        currentImg.classList.remove('fade-in');
+        currentImg.classList.add('fade-out');
+        activeLayer[type] = next;
+      };
+
+      if (nextImg.complete && nextImg.naturalWidth > 0) {
+        doSwap();
+      } else {
+        nextImg.onload = doSwap;
+      }
+      
+      nextImg.onclick = () => openLightbox(newSrc);
+    }
+
+    // --- Update photo viewer with crossfade ---
+    function updateViewer(index) {
+      const entry = data.entries[index];
+      if (!entry) return;
+
+      // Date & info
+      document.getElementById('current-date').textContent = fmtDate(entry.date);
+      document.getElementById('current-notes').textContent = entry.notes || '';
+
+      let statsHtml = '';
+      if (entry.weight != null) statsHtml += `<span class="chip">⚖️ <strong>${entry.weight} kg</strong></span>`;
+      if (entry.bodyFat != null) statsHtml += `<span class="chip">📐 <strong>${entry.bodyFat}%</strong> BF</span>`;
+      document.getElementById('current-stats').innerHTML = statsHtml;
+
+      // Crossfade photos
+      const types = ['front', 'back', 'profile'];
+      types.forEach(type => {
+        if (entry.photos && entry.photos[type]) {
+          crossfadeSlot(type, entry.photos[type]);
+        }
+      });
+
+      // Day count
+      if (data.entries.length > 0) {
+        const first = new Date(data.entries[0].date + 'T00:00:00');
+        const curr = new Date(entry.date + 'T00:00:00');
+        const days = Math.round((curr - first) / 86400000);
+        document.getElementById('slider-day-count').textContent = `Jour ${days}`;
+      }
+    }
+
+    // --- Initialize slider ---
+    function initSlider() {
+      const slider = document.getElementById('timeline-slider');
+      const max = data.entries.length - 1;
+      slider.max = max;
+      slider.value = max;
+
+      if (data.entries.length > 0) {
+        document.getElementById('slider-start').textContent = fmtDate(data.entries[0].date);
+        document.getElementById('slider-end').textContent = fmtDate(data.entries[max].date);
+      }
+
+      slider.addEventListener('input', () => {
+        const idx = parseInt(slider.value);
+        if (idx !== currentIndex) {
+          currentIndex = idx;
+          updateViewer(currentIndex);
+        }
+      });
+
+      // Keyboard arrows
+      document.addEventListener('keydown', e => {
+        if (e.target.tagName === 'SELECT') return;
+        if (e.key === 'ArrowLeft' && currentIndex > 0) {
+          currentIndex--;
+          slider.value = currentIndex;
+          updateViewer(currentIndex);
+        } else if (e.key === 'ArrowRight' && currentIndex < max) {
+          currentIndex++;
+          slider.value = currentIndex;
+          updateViewer(currentIndex);
+        }
+      });
+    }
+
+    // --- Compare ---
+    function photoCard(src, label) {
+      return `<div class="photo-card">
+        <img src="${src}" alt="${label}" loading="lazy" onclick="openLightbox('${src}')">
+        <div class="label">${label}</div>
+      </div>`;
+    }
+
+    function renderCompareSelects() {
+      const before = document.getElementById('compare-before');
+      const after = document.getElementById('compare-after');
+      [before, after].forEach(sel => {
+        sel.innerHTML = '';
+        data.entries.forEach((entry, i) => {
+          const opt = document.createElement('option');
+          opt.value = i;
+          opt.textContent = fmtDate(entry.date);
+          sel.appendChild(opt);
+        });
+      });
+      if (data.entries.length > 1) {
+        before.value = 0;
+        after.value = data.entries.length - 1;
+      }
+      before.onchange = after.onchange = renderCompare;
+    }
+
+    function renderCompare() {
+      const view = document.getElementById('compare-view');
+      const bi = parseInt(document.getElementById('compare-before').value);
+      const ai = parseInt(document.getElementById('compare-after').value);
+      const b = data.entries[bi];
+      const a = data.entries[ai];
+
+      if (!b || !a || data.entries.length < 2) {
+        view.innerHTML = '<div class="compare-empty">Ajoute plus d\'entrées pour comparer.</div>';
+        return;
+      }
+
+      const labels = { front: 'Face', back: 'Dos', profile: 'Profil' };
+      function colPhotos(entry) {
+        let h = '';
+        for (const [key, label] of Object.entries(labels)) {
+          if (entry.photos && entry.photos[key]) h += photoCard(entry.photos[key], label);
+        }
+        return h;
+      }
+
+      view.innerHTML = `<div class="compare-grid">
+        <div class="compare-col">
+          <div class="date-label">${fmtDate(b.date)}</div>
+          <div class="photo-grid-small">${colPhotos(b)}</div>
+        </div>
+        <div class="compare-col">
+          <div class="date-label">${fmtDate(a.date)}</div>
+          <div class="photo-grid-small">${colPhotos(a)}</div>
+        </div>
+      </div>`;
+    }
+
+    // --- Chart ---
+    let chartInstance = null;
+    function renderChart() {
+      const hasWeight = data.entries.some(e => e.weight != null);
+      const hasBF = data.entries.some(e => e.bodyFat != null);
+      const chartEmpty = document.getElementById('chart-empty');
+      const canvas = document.getElementById('chart');
+
+      if (!hasWeight && !hasBF) {
+        canvas.style.display = 'none';
+        chartEmpty.style.display = 'flex';
+        return;
+      }
+      canvas.style.display = 'block';
+      chartEmpty.style.display = 'none';
+
+      const labels = data.entries.map(e => fmtDate(e.date));
+      const datasets = [];
+
+      if (hasWeight) {
+        datasets.push({
+          label: 'Poids (kg)',
+          data: data.entries.map(e => e.weight),
+          borderColor: '#6c63ff',
+          backgroundColor: 'rgba(108,99,255,0.1)',
+          tension: 0.3, fill: true, yAxisID: 'y',
+          pointRadius: 5, pointBackgroundColor: '#6c63ff',
+        });
+      }
+      if (hasBF) {
+        datasets.push({
+          label: 'Body Fat %',
+          data: data.entries.map(e => e.bodyFat),
+          borderColor: '#ff6b6b',
+          backgroundColor: 'rgba(255,107,107,0.1)',
+          tension: 0.3, fill: true, yAxisID: 'y1',
+          pointRadius: 5, pointBackgroundColor: '#ff6b6b',
+        });
+      }
+
+      if (chartInstance) chartInstance.destroy();
+      chartInstance = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { intersect: false, mode: 'index' },
+          plugins: { legend: { labels: { color: '#e8e8e8', usePointStyle: true } } },
+          scales: {
+            x: { ticks: { color: '#888' }, grid: { color: '#2a2a2a' } },
+            y: {
+              type: 'linear', position: 'left',
+              title: { display: true, text: 'kg', color: '#888' },
+              ticks: { color: '#888' }, grid: { color: '#2a2a2a' }
+            },
+            y1: {
+              type: 'linear', position: 'right',
+              title: { display: true, text: '%', color: '#888' },
+              ticks: { color: '#888' }, grid: { drawOnChartArea: false }
+            }
+          }
+        }
+      });
+    }
+
+    // --- Load & init ---
+    fetch('data.json')
+      .then(r => r.json())
+      .then(d => {
+        data = d;
+        data.entries.sort((a, b) => a.date.localeCompare(b.date));
+        currentIndex = data.entries.length - 1;
+
+        preloadAllImages();
+        initSlider();
+        updateViewer(currentIndex);
+        renderCompareSelects();
+        renderCompare();
+        renderChart();
+      })
+      .catch(err => {
+        console.error('Failed to load data.json:', err);
+        document.querySelector('.container').innerHTML =
+          '<div class="compare-empty">Impossible de charger data.json</div>';
+      });
+  </script>
+</body>
+</html>
