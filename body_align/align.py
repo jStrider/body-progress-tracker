@@ -189,6 +189,8 @@ def align_and_crop(
     view: str,
     output_w: int = DEFAULT_OUTPUT_W,
     output_h: int = DEFAULT_OUTPUT_H,
+    quality: int = 92,
+    output_format: str = "jpg",
 ) -> bool:
     """
     Full alignment pipeline for a single image.
@@ -211,7 +213,7 @@ def align_and_crop(
         print(f"  [FALLBACK] No pose for {image_path.name}, center crop")
         result = _center_crop_with_padding(img, output_w, output_h)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(output_path), result, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        _save_image(result, output_path, output_format, quality)
         return True
 
     smid_x, smid_y = pose["shoulder_mid"]
@@ -295,8 +297,19 @@ def align_and_crop(
         result = cv2.flip(result, 1)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    cv2.imwrite(str(output_path), result, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    _save_image(result, output_path, output_format, quality)
     return True
+
+
+def _save_image(img, path: Path, fmt: str = "jpg", quality: int = 92) -> None:
+    """Save OpenCV image to disk in specified format."""
+    fmt = fmt.lower()
+    path = Path(str(path).rsplit(".", 1)[0] + "." + ("jpg" if fmt == "jpg" else "png"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == "png":
+        cv2.imwrite(str(path), img, [cv2.IMWRITE_PNG_COMPRESSION, 6])
+    else:
+        cv2.imwrite(str(path), img, [cv2.IMWRITE_JPEG_QUALITY, quality])
 
 
 def segment_person_bbox(image_path: Path) -> Optional[dict]:
@@ -343,6 +356,8 @@ def force_align_single(
     image_path: Path,
     output_w: int = DEFAULT_OUTPUT_W,
     output_h: int = DEFAULT_OUTPUT_H,
+    quality: int = 92,
+    output_format: str = "jpg",
 ) -> bool:
     """
     Second pass: use segmentation to find exact body bbox,
@@ -389,17 +404,23 @@ def force_align_single(
     if src_y1 > src_y0 and src_x1 > src_x0:
         result[dst_y0:dst_y1, dst_x0:dst_x1] = scaled[src_y0:src_y1, src_x0:src_x1]
 
-    cv2.imwrite(str(image_path), result, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    _save_image(result, image_path, output_format, quality)
     return True
 
 
-def remove_background(image_path: Path, bg_color: tuple = DEFAULT_BG_COLOR) -> None:
+def remove_background(
+    image_path: Path,
+    bg_color: tuple = DEFAULT_BG_COLOR,
+    quality: int = 92,
+    output_format: str = "jpg",
+) -> None:
     """Remove background from image and replace with uniform color."""
     img = PILImage.open(str(image_path)).convert("RGBA")
     out = rembg_remove(img)
     bg = PILImage.new("RGBA", out.size, (*bg_color[::-1], 255))  # BGR->RGB
     result = PILImage.alpha_composite(bg, out).convert("RGB")
-    result.save(str(image_path), quality=92)
+    save_kwargs = {"quality": quality} if output_format.lower() == "jpg" else {}
+    result.save(str(image_path), **save_kwargs)
 
 
 def align_photos(
@@ -423,10 +444,16 @@ def align_photos(
             - bg_color: hex color string (default: "#1E1E1E")
             - size: "WxH" string (default: "800x1067")
             - no_bg: bool, skip background removal (default: False)
+            - quality: int 1-100, JPEG quality (default: 92)
+            - output_format: "jpg" or "png" (default: "jpg")
+            - overwrite: bool, overwrite existing files (default: False)
+            - no_force_align: bool, skip segmentation second pass (default: False)
+            - pose_model: "lite"|"full"|"heavy" (default: "full")
+            - print_stats: bool, collect and return alignment metrics (default: False)
 
     Returns:
         dict with keys "front", "back", "profile" pointing to output paths,
-        and "success" bool.
+        "success" bool, and optionally "stats" dict.
     """
     from datetime import date as DateClass
 
@@ -443,6 +470,11 @@ def align_photos(
     output_w, output_h = _parse_size(size_str)
 
     no_bg = options.get("no_bg", False)
+    quality = options.get("quality", 92)
+    output_format = options.get("output_format", "jpg")
+    overwrite = options.get("overwrite", False)
+    no_force_align = options.get("no_force_align", False)
+    print_stats = options.get("print_stats", False)
 
     out_dir = Path(output_dir) / date
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -454,6 +486,7 @@ def align_photos(
     }
 
     output_paths = {}
+    collected_stats = {}
     any_success = False
 
     for view, src in views.items():
@@ -464,25 +497,46 @@ def align_photos(
             print(f"  [SKIP] {src} not found")
             continue
 
-        out_path = out_dir / f"{view}.jpg"
+        ext = "jpg" if output_format.lower() == "jpg" else "png"
+        out_path = out_dir / f"{view}.{ext}"
+
+        # Skip if already exists and no overwrite
+        if out_path.exists() and not overwrite:
+            print(f"  [{view}] already exists, skipping (use overwrite=True to redo)")
+            output_paths[view] = str(out_path)
+            any_success = True
+            continue
 
         pose = detect_pose(src_path)
         if pose:
+            stats_entry = {
+                "rotation_angle": round(pose["shoulder_angle"], 2),
+                "body_tilt": round(pose["body_tilt"], 2),
+                "head_y": round(pose["head_top_y"], 1),
+                "feet_y": round(pose["feet_bottom_y"], 1),
+                "body_height_px": round(pose["body_height"], 1),
+            }
             print(f"  [{view}] body_h={pose['body_height']:.0f}px, "
                   f"angle={pose['shoulder_angle']:.1f}°, tilt={pose['body_tilt']:.1f}°")
+            if print_stats:
+                collected_stats[view] = stats_entry
         else:
             print(f"  [{view}] No pose detected, using fallback")
 
-        if align_and_crop(src_path, out_path, pose, view, output_w, output_h):
-            # Force-align pass
-            force_align_single(out_path, output_w, output_h)
+        if align_and_crop(src_path, out_path, pose, view, output_w, output_h, quality, output_format):
+            # Force-align pass (unless disabled)
+            if not no_force_align:
+                force_align_single(out_path, output_w, output_h, quality, output_format)
 
             # Background removal
             if not no_bg:
                 print(f"  [{view}] Removing background...")
-                remove_background(out_path, bg_color)
+                remove_background(out_path, bg_color, quality, output_format)
 
             output_paths[view] = str(out_path)
             any_success = True
 
-    return {**output_paths, "success": any_success, "date": date}
+    result = {**output_paths, "success": any_success, "date": date}
+    if print_stats and collected_stats:
+        result["stats"] = collected_stats
+    return result
